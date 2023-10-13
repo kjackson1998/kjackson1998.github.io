@@ -221,10 +221,7 @@ function computeOffsetAndScale(canvas, margins, worldPointMin, worldPointMax, sc
     // Offset is the world center distance from the screen center
     const screenCenter = Vector.add(screenPointMinWithMargin, Vector.div(Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin), 2));
     const worldCenter = Vector.add(worldPointMin, Vector.div(Vector.sub(worldPointMax, worldPointMin), 2));
-    const worldOffset = Vector.sub(worldCenter, screenToWorld(canvas, screenCenter));
-
-    // offset is the world point corner with the margin added in
-    canvas.world.offset = worldOffset;
+    canvas.world.offset = Vector.sub(worldCenter, screenToWorld(canvas, screenCenter));
 }
 
 function screenToWorld(canvas, pos) {
@@ -255,7 +252,7 @@ async function getWaypointRenderables(waypoint) {
             worldX: 0,
             worldY: 0,
             tooltipRange: 20,
-            tooltipText: `${waypoint.symbol} ${waypoint.type}`,
+            tooltipText: `${waypoint.symbol} ${waypoint.type} [${waypoint.traits.map(t => t.name).join(", ")}]`,
             render: (canvas, ctx) => renderWaypoint(canvas, ctx, waypoint, Vector.create(0, 0), true),
             waypoint: waypoint
         }
@@ -550,9 +547,9 @@ function renderSystem(canvas, ctx, system, pos) {
         const waypointCount = system.waypoints?.length ?? 0;
         if (waypointCount <= 0) {
             ctx.fillStyle = rgb(0, 0, 0);
-        } else if (waypointCount <= 1) {
+        } else if (waypointCount <= 3) {
             ctx.fillStyle = rgb(16, 32, 16);
-        } else if (waypointCount <= 7) {
+        } else if (waypointCount <= 9) {
             ctx.fillStyle = rgb(32, 64, 32);
         } else {
             ctx.fillStyle = rgb(48, 128, 48);

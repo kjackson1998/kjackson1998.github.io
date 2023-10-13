@@ -28,6 +28,7 @@
             }
             #content {
                 position: relative;
+                height: 100%;
                 z-index: 1;
                 pointer-events: none;
             }
@@ -40,6 +41,13 @@
                     1px -1px 0 blue,
                     -1px 1px 0 blue,
                     1px 1px 0 blue;
+            }
+            #infoBar {
+                position: absolute;
+                bottom: 0;
+                font-size: 16pt;
+                margin: 5px;
+                color: rgb(11, 121, 169);
             }
             .radioBar {
                 background-color: rgb(64, 64, 64);
@@ -78,6 +86,14 @@
                 <div class="button" onclick="onStarColorClick()">waypoints</div>
             </div>-->
             <div id="statusBar"></div>
+            <div id="infoBar">
+                <ul>
+                    <li>Click+Drag: Pan</li>
+                    <li>MouseWheel: Zoom</li>
+                    <li>Click: Open System</li>
+                    <li>RightClick: Return from System</li>
+                </ul>
+            </div>
         </div>
     </body>
 </html>
