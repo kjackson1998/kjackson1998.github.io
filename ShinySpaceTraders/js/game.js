@@ -2,67 +2,7 @@
 const Matter = window.Matter;
 const Vector = Matter.Vector;
 
-function pushWorld(canvas, world) {
-    if (canvas.world) {
-        canvas.worldStack.push(canvas.world);
-    }
-
-    canvas.world = world;
-
-    canvas.world.renderMin = Vector.create(Number.MAX_VALUE, Number.MAX_VALUE);
-    canvas.world.renderMax = Vector.create(Number.MIN_VALUE, Number.MIN_VALUE);
-    for (const renderable of canvas.world.renderables) {
-        canvas.world.renderMin.x = Math.min(canvas.world.renderMin.x, renderable.worldX);
-        canvas.world.renderMax.x = Math.max(canvas.world.renderMax.x, renderable.worldX);
-        canvas.world.renderMin.y = Math.min(canvas.world.renderMin.y, renderable.worldY);
-        canvas.world.renderMax.y = Math.max(canvas.world.renderMax.y, renderable.worldY);
-    }
-
-    if (canvas.world.renderMin.x == Number.MAX_VALUE) canvas.world.renderMin.x = -1;
-    if (canvas.world.renderMin.y == Number.MAX_VALUE) canvas.world.renderMin.y = -1;
-    if (canvas.world.renderMax.x == Number.MIN_VALUE) canvas.world.renderMax.x = 1;
-    if (canvas.world.renderMax.y == Number.MIN_VALUE) canvas.world.renderMax.y = 1;
-
-    const margins = Vector.create(150, 150);
-    computeOffsetAndScale(
-        canvas,
-        margins,
-        canvas.world.renderMin,
-        canvas.world.renderMax,
-        Vector.create(0, 0),
-        Vector.create(canvas.width, canvas.height));
-}
-
-function computeOffsetAndScale(canvas, margins, worldPointMin, worldPointMax, screenPointMin, screenPointMax) {
-    // identity
-    canvas.world.offset = Vector.create(0, 0);
-    canvas.world.scale = 1;
-
-    const screenPointMinWithMargin = Vector.add(screenPointMin, margins);
-    const screenPointMaxWithMargin = Vector.sub(screenPointMax, margins);
-
-    // Compute the scale based on the ratio of screen distances to world distances
-    const screenDist = Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin);
-    const worldDist = Vector.sub(worldPointMax, worldPointMin);
-    const scaleX = screenDist.x / worldDist.x;
-    const scaleY = screenDist.y / worldDist.y;
-    canvas.world.scale = Math.min(scaleX, scaleY);
-
-    // Offset is the world center distance from the screen center
-    const screenCenter = Vector.add(screenPointMinWithMargin, Vector.div(Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin), 2));
-    const worldCenter = Vector.add(worldPointMin, Vector.div(Vector.sub(worldPointMax, worldPointMin), 2));
-    const worldOffset = Vector.sub(worldCenter, screenToWorld(canvas, screenCenter));
-
-    // offset is the world point corner with the margin added in
-    canvas.world.offset = worldOffset;
-}
-
-function popWorld(canvas) {
-    if (canvas.worldStack.length == 0) return;
-    canvas.world = canvas.worldStack.pop();
-}
-
-window.addEventListener('load', async function() {
+window.addEventListener('load', function() {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
@@ -73,8 +13,6 @@ window.addEventListener('load', async function() {
     canvas.lastMouseY = null;
     canvas.worldStack = [];
 
-    pushWorld(canvas, await getGalaxyRenderables());
-
     canvas.addEventListener("mousedown", canvasMouseDown);
     canvas.addEventListener("mouseup", canvasMouseUp);
     canvas.addEventListener("mousemove", canvasMouseMove);
@@ -82,8 +20,49 @@ window.addEventListener('load', async function() {
     canvas.addEventListener("contextmenu", canvasMouseRightClick);
     window.addEventListener("resize", event => windowResize(event, canvas));
 
+    let contentDiv = this.document.getElementById('content');
+    let starColorSelector = contentDiv.querySelector('#starColorSelector');
+    if (starColorSelector) {
+        contentDiv.removeChild(starColorSelector);
+    }
+    starColorSelector = Object.assign(this.document.createElement('div'), {
+        className: 'radioBar'
+    });
+    contentDiv.prepend(starColorSelector);
+    starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
+        innerText: 'star color',
+        className: 'header'
+    }));
+    let d = starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
+        innerText: 'type',
+        className: 'button',
+        onclick: e => selectStarColor(e, canvas)
+     }));
+     starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
+        innerText: 'faction',
+        className: 'button',
+        onclick: e => selectStarColor(e, canvas)
+     }));
+     starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
+        innerText: 'waypoints',
+        className: 'button',
+        onclick: e => selectStarColor(e, canvas)
+     }));
+     d.click();
+
+
     requestAnimationFrame(() => render(canvas, ctx));
+
+    getGalaxyRenderables()
+        .then(renderables => pushWorld(canvas, renderables));
 });
+
+function selectStarColor(event, canvas) {
+    canvas.starColor = event.currentTarget.innerText;
+    event.currentTarget.parentNode.querySelectorAll('.button')
+        .forEach(b => b.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+}
 
 function windowResize(event, canvas) {
     const oldCornerPos = screenToWorld(canvas, Vector.create(0, 0));
@@ -93,14 +72,6 @@ function windowResize(event, canvas) {
     canvas.world.offset = Vector.add(canvas.world.offset, Vector.sub(newCornerPos, oldCornerPos));
 }
 
-async function canvasMouseRightClick(event) {
-    event.preventDefault();
-    const canvas = event.currentTarget;
-
-    popWorld(canvas);
-    canvasMouseMove(event);
-}
-
 function canvasMouseClick(event) {
     const canvas = event.currentTarget;
     if (canvas.nearestRenderable == null) return;
@@ -108,6 +79,14 @@ function canvasMouseClick(event) {
     if (canvas.nearestRenderable.click) {
         canvas.nearestRenderable.click(event);
     }
+}
+
+async function canvasMouseRightClick(event) {
+    event.preventDefault();
+    const canvas = event.currentTarget;
+
+    popWorld(canvas);
+    canvasMouseMove(event);
 }
 
 function canvasMouseDown(event) {
@@ -131,6 +110,19 @@ function canvasMouseUp(event) {
         canvas.lastMouseX = null;
         canvas.lastMouseY = null;
     }
+};
+
+function canvasMouseWheel(event) {
+    const canvas = event.currentTarget;
+    const oldWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
+    for (i = 0; i < Math.abs(event.deltaY); i++) {
+        if (event.deltaY < 0)
+            canvas.world.scale *= 1.001;
+        else
+            canvas.world.scale *= 0.999;
+    }
+    const newWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
+    canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
 };
 
 function canvasMouseMove(event) {
@@ -175,18 +167,65 @@ function canvasMouseMove(event) {
     }
 };
 
-function canvasMouseWheel(event) {
-    const canvas = event.currentTarget;
-    const oldWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
-    for (i = 0; i < Math.abs(event.deltaY); i++) {
-        if (event.deltaY < 0)
-            canvas.world.scale *= 1.001;
-        else
-            canvas.world.scale *= 0.999;
+function pushWorld(canvas, world) {
+    if (canvas.world) {
+        canvas.worldStack.push(canvas.world);
     }
-    const newWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
-    canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
-};
+
+    canvas.world = world;
+
+    canvas.world.renderMin = Vector.create(Number.MAX_VALUE, Number.MAX_VALUE);
+    canvas.world.renderMax = Vector.create(Number.MIN_VALUE, Number.MIN_VALUE);
+    for (const renderable of canvas.world.renderables) {
+        canvas.world.renderMin.x = Math.min(canvas.world.renderMin.x, renderable.worldX);
+        canvas.world.renderMax.x = Math.max(canvas.world.renderMax.x, renderable.worldX);
+        canvas.world.renderMin.y = Math.min(canvas.world.renderMin.y, renderable.worldY);
+        canvas.world.renderMax.y = Math.max(canvas.world.renderMax.y, renderable.worldY);
+    }
+
+    if (canvas.world.renderMin.x == Number.MAX_VALUE) canvas.world.renderMin.x = -1;
+    if (canvas.world.renderMin.y == Number.MAX_VALUE) canvas.world.renderMin.y = -1;
+    if (canvas.world.renderMax.x == Number.MIN_VALUE) canvas.world.renderMax.x = 1;
+    if (canvas.world.renderMax.y == Number.MIN_VALUE) canvas.world.renderMax.y = 1;
+
+    const margins = Vector.create(150, 150);
+    computeOffsetAndScale(
+        canvas,
+        margins,
+        canvas.world.renderMin,
+        canvas.world.renderMax,
+        Vector.create(0, 0),
+        Vector.create(canvas.width, canvas.height));
+}
+
+function popWorld(canvas) {
+    if (canvas.worldStack.length == 0) return;
+    canvas.world = canvas.worldStack.pop();
+}
+
+function computeOffsetAndScale(canvas, margins, worldPointMin, worldPointMax, screenPointMin, screenPointMax) {
+    // identity
+    canvas.world.offset = Vector.create(0, 0);
+    canvas.world.scale = 1;
+
+    const screenPointMinWithMargin = Vector.add(screenPointMin, margins);
+    const screenPointMaxWithMargin = Vector.sub(screenPointMax, margins);
+
+    // Compute the scale based on the ratio of screen distances to world distances
+    const screenDist = Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin);
+    const worldDist = Vector.sub(worldPointMax, worldPointMin);
+    const scaleX = screenDist.x / worldDist.x;
+    const scaleY = screenDist.y / worldDist.y;
+    canvas.world.scale = Math.min(scaleX, scaleY);
+
+    // Offset is the world center distance from the screen center
+    const screenCenter = Vector.add(screenPointMinWithMargin, Vector.div(Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin), 2));
+    const worldCenter = Vector.add(worldPointMin, Vector.div(Vector.sub(worldPointMax, worldPointMin), 2));
+    const worldOffset = Vector.sub(worldCenter, screenToWorld(canvas, screenCenter));
+
+    // offset is the world point corner with the margin added in
+    canvas.world.offset = worldOffset;
+}
 
 function screenToWorld(canvas, pos) {
     pos = Vector.div(pos, canvas.world.scale);
@@ -200,15 +239,11 @@ function worldToScreen(canvas, pos) {
     return pos;
 }
 
-function rgb(r, g, b) {
-    return `rgb(${r},${g},${b})`;
-}
-
 function render(canvas, ctx) {
     requestAnimationFrame(() => render(canvas, ctx));
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const renderable of canvas.world.renderables) {
+    for (const renderable of canvas.world?.renderables ?? []) {
         renderable.render(canvas, ctx);
     }
 }
@@ -226,7 +261,10 @@ async function getWaypointRenderables(waypoint) {
         }
     );
     for (const childWaypoint of waypoint.children) {
-        const pos = await synthesizeOrbitalPosition(childWaypoint);
+        const i = Math.abs(hashToInteger(await hashString(childWaypoint.symbol)));
+        const mult = (2 * Math.PI);
+        const dist = (i % 10.1) + 1;
+        const pos = Vector.mult(Vector.create(Math.sin(i % mult), Math.cos(i % mult)), dist);
         renderables.push(
             {
                 worldX: pos.x,
@@ -247,13 +285,6 @@ async function getWaypointRenderables(waypoint) {
     }
 
     return { renderables: renderables };
-}
-
-async function synthesizeOrbitalPosition(waypoint) {
-    const i = Math.abs(hashToInteger(await hashString(waypoint.symbol)));
-    const mult = (2 * Math.PI);
-    const dist = (i % 10.1) + 1;
-    return Vector.mult(Vector.create(Math.sin(i % mult), Math.cos(i % mult)), dist);
 }
 
 async function getSystemRenderables(system) {
@@ -333,6 +364,50 @@ async function getSystemRenderables(system) {
     return { renderables: renderables };
 }
 
+function renderWaypoint(canvas, ctx, waypoint, pos, skipCount) {
+    const screenPos = worldToScreen(canvas, pos);
+
+    // draw the orbit
+    ctx.beginPath();
+    const parentPos = worldToScreen(canvas, Vector.create(0, 0));
+    ctx.arc(
+        parentPos.x,
+        parentPos.y,
+        Vector.magnitude(Vector.sub(screenPos, parentPos)),
+        0,
+        2 * Math.PI);
+    ctx.strokeStyle = rgb(32, 32, 32);
+    ctx.closePath();
+    ctx.stroke();
+
+    // draw the waypoint
+    let radius = 4;
+    ctx.beginPath();
+    ctx.arc(
+        screenPos.x,
+        screenPos.y,
+        radius,
+        0,
+        2 * Math.PI);
+    ctx.closePath();
+    ctx.strokeStyle = "white";
+    ctx.strokeWidth = 2;
+    switch (waypoint.type) {
+        default:
+            ctx.fillStyle = rgb(0, 0, 255);
+            break;
+    }
+    ctx.stroke();
+    ctx.fill();
+
+    // draw the number of children if there are
+    if (!skipCount && waypoint.children.length > 0) {
+        ctx.fillStyle = "white";
+        ctx.font = "12px Arial";
+        ctx.fillText(waypoint.orbitals.length + 1, screenPos.x + 5, screenPos.y - 10);
+    }
+}
+
 async function getGalaxyRenderables() {
     const response = await fetch("data/systems.json.gz");
     if (response.status == 404) {
@@ -380,17 +455,6 @@ async function getGalaxyRenderables() {
     return { renderables: renderables };
 }
 
-function copyEvent(event) {
-    return {
-        currentTarget: event.currentTarget,
-        button: event.button,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        deltaX: event.deltaX,
-        deltaY: event.deltaY
-    };
-}
-
 function renderSystem(canvas, ctx, system, pos) {
     const screenPos = worldToScreen(canvas, pos);
 
@@ -403,86 +467,99 @@ function renderSystem(canvas, ctx, system, pos) {
         radius,
         0,
         2 * Math.PI);
-    ctx.strokeStyle = "white";
+    ctx.closePath();
     ctx.strokeWidth = 2;
-    switch (system.type) {
-        case "BLUE_STAR":
-            ctx.fillStyle = rgb(0, 0, 255);
-            break;
-        case "RED_STAR":
-            ctx.fillStyle = rgb(255, 0, 0);
-            break;
-        case "ORANGE_STAR":
-            ctx.fillStyle = rgb(255, 128, 0);
-            break;
-        case "WHITE_DWARF":
-            ctx.fillStyle = rgb(255, 255, 255);
-            break;
-        case "BLACK_HOLE":
+    if (canvas.starColor == 'type') {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        switch (system.type) {
+            case "BLUE_STAR":
+                ctx.fillStyle = rgb(0, 0, 128);
+                break;
+            case "RED_STAR":
+                ctx.fillStyle = rgb(64, 0, 0);
+                break;
+            case "ORANGE_STAR":
+                ctx.fillStyle = rgb(128, 64, 0);
+                break;
+            case "WHITE_DWARF":
+                ctx.fillStyle = rgb(192, 192, 192);
+                break;
+            case "BLACK_HOLE":
+                ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+                ctx.fillStyle = rgb(0, 0, 0);
+                break;
+            case "UNSTABLE":
+                ctx.fillStyle = rgb(128, 0, 128);
+                break;
+            case "NEUTRON_STAR":
+                ctx.fillStyle = rgb(128, 128, 255);
+                break;
+            case "HYPERGIANT":
+                ctx.fillStyle = rgb(255, 128, 128);
+                break;
+            case "YOUNG_STAR":
+                ctx.fillStyle = rgb(0, 64, 0);
+                break;
+            default:
+                throw "Unknown system type: " + system.type;
+        }
+    } else if (canvas.starColor == 'faction') {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+        if (system.factions?.length > 1) {
+            console.log('multiple factions: ' + JSON.stringify(system));
+        }
+        const faction = system.factions[0]?.symbol ?? null;
+        switch (faction) {
+            // Reds
+            case "QUANTUM":
+                ctx.fillStyle = rgb(64, 0, 0);
+                break;
+            case "DOMINION":
+                ctx.fillStyle = rgb(255, 0, 0);
+                break;
+
+            // Greens
+            case "GALACTIC":
+                ctx.fillStyle = rgb(0, 64, 0);
+                break;
+            case "ECHO":
+                ctx.fillStyle = rgb(0, 255, 0);
+                break;
+
+            // Blues
+            case "VOID":
+                ctx.fillStyle = rgb(0, 0, 64);
+                break;
+
+            // Yellows
+            case "COSMIC":
+                ctx.fillStyle = rgb(64, 64, 0);
+                break;
+
+            case null:
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+                break;
+            default:
+                ctx.fillStyle = rgb(255, 255, 255);
+                console.log("Unknown system faction: " + faction);
+                break;
+        }
+    } else if (canvas.starColor == 'waypoints') {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        const waypointCount = system.waypoints?.length ?? 0;
+        if (waypointCount <= 0) {
             ctx.fillStyle = rgb(0, 0, 0);
-            break;
-        case "UNSTABLE":
-            ctx.fillStyle = rgb(255, 0, 255);
-            break;
-        case "NEUTRON_STAR":
-            ctx.fillStyle = rgb(128, 128, 255);
-            break;
-        case "HYPERGIANT":
-            ctx.fillStyle = rgb(255, 128, 128);
-            break;
-        case "YOUNG_STAR":
-            ctx.fillStyle = rgb(0, 127, 0);
-            break;
-        default:
-            throw "Unknown system type: " + system.type;
+        } else if (waypointCount <= 1) {
+            ctx.fillStyle = rgb(16, 32, 16);
+        } else if (waypointCount <= 7) {
+            ctx.fillStyle = rgb(32, 64, 32);
+        } else {
+            ctx.fillStyle = rgb(48, 128, 48);
+        }
     }
     ctx.stroke();
     ctx.fill();
-    ctx.closePath();
-}
-
-function renderWaypoint(canvas, ctx, waypoint, pos, skipCount) {
-    const screenPos = worldToScreen(canvas, pos);
-
-    // draw the orbit
-    ctx.beginPath();
-    const parentPos = worldToScreen(canvas, Vector.create(0, 0));
-    ctx.arc(
-        parentPos.x,
-        parentPos.y,
-        Vector.magnitude(Vector.sub(screenPos, parentPos)),
-        0,
-        2 * Math.PI);
-    ctx.strokeStyle = rgb(32, 32, 32);
-    ctx.stroke();
-    ctx.closePath();
-
-    // draw the waypoint
-    let radius = 4;
-    ctx.beginPath();
-    ctx.arc(
-        screenPos.x,
-        screenPos.y,
-        radius,
-        0,
-        2 * Math.PI);
-    ctx.strokeStyle = "white";
-    ctx.strokeWidth = 2;
-    switch (waypoint.type) {
-        default:
-            ctx.fillStyle = rgb(0, 0, 255);
-            break;
-    }
-    ctx.stroke();
-    ctx.fill();
-    ctx.closePath();
-
-    // draw the number of children if there are
-    if (!skipCount && waypoint.children.length > 0) {
-        ctx.fillStyle = "white";
-        ctx.font = "12px Arial";
-        ctx.fillText(waypoint.orbitals.length, screenPos.x + 5, screenPos.y - 10);
-    }
 }
 
 async function hashString(str) {
@@ -502,4 +579,19 @@ function hashToInteger(hash) {
     }
 
     return integer;
+}
+
+function copyEvent(event) {
+    return {
+        currentTarget: event.currentTarget,
+        button: event.button,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        deltaX: event.deltaX,
+        deltaY: event.deltaY
+    };
+}
+
+function rgb(r, g, b) {
+    return `rgb(${r},${g},${b})`;
 }
