@@ -2,16 +2,18 @@
 const Matter = window.Matter;
 const Vector = Matter.Vector;
 
-window.addEventListener('load', function() {
+window.addEventListener('load', windowLoad);
+
+function windowLoad(event) {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
     canvas.isMouseDown = false;
-    canvas.lastMouseX = null;
-    canvas.lastMouseY = null;
+    canvas.lastMouse = null;
     canvas.worldStack = [];
+    canvas.gameOptions = {};
 
     canvas.addEventListener("mousedown", canvasMouseDown);
     canvas.addEventListener("mouseup", canvasMouseUp);
@@ -33,51 +35,61 @@ window.addEventListener('load', function() {
         innerText: 'star color',
         className: 'header'
     }));
+    function selectStarColor(event) {
+        canvas.gameOptions.starColor = event.currentTarget.innerText;
+        event.currentTarget.parentNode.querySelectorAll('.button')
+            .forEach(b => b.classList.remove('selected'));
+        event.currentTarget.classList.add('selected');
+    }
     let d = starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
         innerText: 'type',
         className: 'button',
-        onclick: e => selectStarColor(e, canvas)
-     }));
-     starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
+        onclick: selectStarColor
+    }));
+    starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
         innerText: 'faction',
         className: 'button',
-        onclick: e => selectStarColor(e, canvas)
-     }));
-     starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
+        onclick: selectStarColor
+    }));
+        starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
         innerText: 'waypoints',
         className: 'button',
-        onclick: e => selectStarColor(e, canvas)
-     }));
-     d.click();
-
+        onclick: selectStarColor
+    }));
+    d.click();
 
     requestAnimationFrame(() => render(canvas, ctx));
 
-    getGalaxyRenderables()
-        .then(renderables => pushWorld(canvas, renderables));
-});
+    Api.fetchGalaxy()
+        .then(systems => {
+            const world = new GalaxyWorld(
+                systems.map(s => new RenderableSystem(s)),
+                canvas.gameOptions);
 
-function selectStarColor(event, canvas) {
-    canvas.starColor = event.currentTarget.innerText;
-    event.currentTarget.parentNode.querySelectorAll('.button')
-        .forEach(b => b.classList.remove('selected'));
-    event.currentTarget.classList.add('selected');
+            const margins = Vector.create(150, 150);
+            world.setFullView(
+                margins,
+                canvas);
+            pushWorld(canvas, world);
+        });
 }
 
 function windowResize(event, canvas) {
-    const oldCornerPos = screenToWorld(canvas, Vector.create(0, 0));
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
-    const newCornerPos = screenToWorld(canvas, Vector.create(0, 0));
+
+    if (canvas.world == null) return;
+    const oldCornerPos = canvas.world.screenToWorld(Vector.create(0, 0));
+    const newCornerPos = canvas.world.screenToWorld(Vector.create(0, 0));
     canvas.world.offset = Vector.add(canvas.world.offset, Vector.sub(newCornerPos, oldCornerPos));
 }
 
 function canvasMouseClick(event) {
     const canvas = event.currentTarget;
-    if (canvas.nearestRenderable == null) return;
+    if (canvas.hoverRenderable == null) return;
 
-    if (canvas.nearestRenderable.click) {
-        canvas.nearestRenderable.click(event);
+    if (canvas.world) {
+        canvas.world.click(event);
     }
 }
 
@@ -93,8 +105,7 @@ function canvasMouseDown(event) {
     const canvas = event.currentTarget;
     if (event.button === 0) {
         canvas.isMouseDown = Date.now();
-        canvas.lastMouseX = event.clientX;
-        canvas.lastMouseY = event.clientY;
+        canvas.lastMouse = Vector.create(event.clientX, event.clientY);
         canvas.mouseMoved = false;
     }
 };
@@ -107,62 +118,62 @@ function canvasMouseUp(event) {
             canvasMouseClick(event);
         }
         canvas.isMouseDown = 0;
-        canvas.lastMouseX = null;
-        canvas.lastMouseY = null;
+        canvas.lastMouse = null;
     }
 };
 
 function canvasMouseWheel(event) {
     const canvas = event.currentTarget;
-    const oldWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
-    for (i = 0; i < Math.abs(event.deltaY); i++) {
-        if (event.deltaY < 0)
-            canvas.world.scale *= 1.001;
-        else
-            canvas.world.scale *= 0.999;
+    if (canvas.world != null) {
+        const oldWorld = canvas.world.screenToWorld(Vector.create(event.clientX, event.clientY));
+        for (i = 0; i < Math.abs(event.deltaY); i++) {
+            if (event.deltaY < 0)
+                canvas.world.scale *= 1.001;
+            else
+                canvas.world.scale *= 0.999;
+        }
+        const newWorld = canvas.world.screenToWorld(Vector.create(event.clientX, event.clientY));
+        canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
     }
-    const newWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
-    canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
 };
 
 function canvasMouseMove(event) {
     const canvas = event.currentTarget;
     if (canvas.isMouseDown) {
-        const oldWorld = screenToWorld(canvas, Vector.create(canvas.lastMouseX, canvas.lastMouseY));
-        const newWorld = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
-        canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
-        canvas.lastMouseX = event.clientX;
-        canvas.lastMouseY = event.clientY;
+        const eventPos = Vector.create(event.clientX, event.clientY)
+        if (canvas.world != null) {
+            const oldWorld = canvas.world.screenToWorld(canvas.lastMouse);
+            const newWorld = canvas.world.screenToWorld(eventPos);
+            canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
+        }
+        canvas.lastMouse = eventPos;
         canvas.mouseMoved = true;
     }
 
     if (canvas.world != null) {
-        const worldPos = screenToWorld(canvas, Vector.create(event.clientX, event.clientY));
-        let nearestDist = Number.MAX_VALUE;
+        const mousePos = Vector.create(event.clientX, event.clientY);
+        let nearestSquaredDist = Number.MAX_VALUE;
         let nearestRenderable = null;
         for (const renderable of canvas.world.renderables) {
-            const dist = Vector.magnitudeSquared(Vector.sub(worldPos, Vector.create(renderable.worldX, renderable.worldY)));
-            if (dist < nearestDist)
+            const squaredDist = Vector.magnitudeSquared(Vector.sub(mousePos, renderable.getScreenPos(canvas.world)));
+            if (squaredDist < nearestSquaredDist)
             {
-                const moustDistSquared = Vector.magnitudeSquared(
-                    Vector.sub(
-                        Vector.create(event.clientX, event.clientY),
-                        worldToScreen(canvas, Vector.create(renderable.worldX, renderable.worldY))));
-
-                if (moustDistSquared < renderable.tooltipRange * renderable.tooltipRange)
+                const hitRadius = renderable.getScreenHitRadius();
+                const hitRadiusSquared = hitRadius * hitRadius;
+                if (squaredDist < hitRadiusSquared)
                 {
-                    nearestDist = dist;
+                    nearestSquaredDist = squaredDist;
                     nearestRenderable = renderable;
                 }
             }
         }
 
         if (nearestRenderable != null) {
-            document.getElementById('statusBar').innerText = nearestRenderable.tooltipText;
-            canvas.nearestRenderable = nearestRenderable;
+            document.getElementById('statusBar').innerText = nearestRenderable.getTooltipText();
+            canvas.hoverRenderable = nearestRenderable;
         } else {
             document.getElementById('statusBar').innerText = ``;
-            canvas.nearestRenderable = null;
+            canvas.hoverRenderable = null;
         }
     }
 };
@@ -173,29 +184,6 @@ function pushWorld(canvas, world) {
     }
 
     canvas.world = world;
-
-    canvas.world.renderMin = Vector.create(Number.MAX_VALUE, Number.MAX_VALUE);
-    canvas.world.renderMax = Vector.create(Number.MIN_VALUE, Number.MIN_VALUE);
-    for (const renderable of canvas.world.renderables) {
-        canvas.world.renderMin.x = Math.min(canvas.world.renderMin.x, renderable.worldX);
-        canvas.world.renderMax.x = Math.max(canvas.world.renderMax.x, renderable.worldX);
-        canvas.world.renderMin.y = Math.min(canvas.world.renderMin.y, renderable.worldY);
-        canvas.world.renderMax.y = Math.max(canvas.world.renderMax.y, renderable.worldY);
-    }
-
-    if (canvas.world.renderMin.x == Number.MAX_VALUE) canvas.world.renderMin.x = -1;
-    if (canvas.world.renderMin.y == Number.MAX_VALUE) canvas.world.renderMin.y = -1;
-    if (canvas.world.renderMax.x == Number.MIN_VALUE) canvas.world.renderMax.x = 1;
-    if (canvas.world.renderMax.y == Number.MIN_VALUE) canvas.world.renderMax.y = 1;
-
-    const margins = Vector.create(150, 150);
-    computeOffsetAndScale(
-        canvas,
-        margins,
-        canvas.world.renderMin,
-        canvas.world.renderMax,
-        Vector.create(0, 0),
-        Vector.create(canvas.width, canvas.height));
 }
 
 function popWorld(canvas) {
@@ -203,272 +191,199 @@ function popWorld(canvas) {
     canvas.world = canvas.worldStack.pop();
 }
 
-function computeOffsetAndScale(canvas, margins, worldPointMin, worldPointMax, screenPointMin, screenPointMax) {
-    // identity
-    canvas.world.offset = Vector.create(0, 0);
-    canvas.world.scale = 1;
-
-    const screenPointMinWithMargin = Vector.add(screenPointMin, margins);
-    const screenPointMaxWithMargin = Vector.sub(screenPointMax, margins);
-
-    // Compute the scale based on the ratio of screen distances to world distances
-    const screenDist = Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin);
-    const worldDist = Vector.sub(worldPointMax, worldPointMin);
-    const scaleX = screenDist.x / worldDist.x;
-    const scaleY = screenDist.y / worldDist.y;
-    canvas.world.scale = Math.min(scaleX, scaleY);
-
-    // Offset is the world center distance from the screen center
-    const screenCenter = Vector.add(screenPointMinWithMargin, Vector.div(Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin), 2));
-    const worldCenter = Vector.add(worldPointMin, Vector.div(Vector.sub(worldPointMax, worldPointMin), 2));
-    canvas.world.offset = Vector.sub(worldCenter, screenToWorld(canvas, screenCenter));
-}
-
-function screenToWorld(canvas, pos) {
-    pos = Vector.div(pos, canvas.world.scale);
-    pos = Vector.add(pos, canvas.world.offset);
-    return pos;
-}
-
-function worldToScreen(canvas, pos) {
-    pos = Vector.sub(pos, canvas.world.offset);
-    pos = Vector.mult(pos, canvas.world.scale);
-    return pos;
-}
-
 function render(canvas, ctx) {
     requestAnimationFrame(() => render(canvas, ctx));
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const renderable of canvas.world?.renderables ?? []) {
-        renderable.render(canvas, ctx);
+    if (canvas.world != null) {
+        canvas.world.render(ctx);
+    } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 }
 
-async function getWaypointRenderables(waypoint) {
-    const renderables = []
-    renderables.push(
-        {
-            worldX: 0,
-            worldY: 0,
-            tooltipRange: 20,
-            tooltipText: `${waypoint.symbol} ${waypoint.type} [${waypoint.traits.map(t => t.name).join(", ")}]`,
-            render: (canvas, ctx) => renderWaypoint(canvas, ctx, waypoint, Vector.create(0, 0), true),
-            waypoint: waypoint
+class Api {
+    static async fetchGalaxy() {
+        const response = await fetch("data/systems.json.gz");
+        if (response.status == 404) {
+            throw "Could not load systems.";
         }
-    );
-    for (const childWaypoint of waypoint.children) {
-        const i = Math.abs(hashToInteger(await hashString(childWaypoint.symbol)));
-        const mult = (2 * Math.PI);
-        const dist = (i % 10.1) + 1;
-        const pos = Vector.mult(Vector.create(Math.sin(i % mult), Math.cos(i % mult)), dist);
-        renderables.push(
-            {
-                worldX: pos.x,
-                worldY: pos.y,
-                tooltipRange: 20,
-                tooltipText: `${childWaypoint.symbol} ${childWaypoint.type} [${childWaypoint.traits.map(t => t.name).join(", ")}]`,
-                render: (canvas, ctx) => renderWaypoint(canvas, ctx, childWaypoint, pos),
-                click: childWaypoint.children.length > 0 ? (event) => {
-                    const canvas = event.currentTarget;
-                    let eventCopy = copyEvent(event);
-                    getWaypointRenderables(canvas.nearestRenderable.waypoint)
-                        .then(renderables => pushWorld(canvas, renderables))
-                        .then(() => canvasMouseMove(eventCopy));
-                } : undefined,
-                waypoint: childWaypoint
-            }
-        );
-    }
-
-    return { renderables: renderables };
-}
-
-async function getSystemRenderables(system) {
-    let response;
     
-    response = await fetch(`https://api.spacetraders.io/v2/systems/${system.symbol}`);
-    if (response.status == 404) {
-        throw "Could not load system data.";
+        const decompressionStream = new DecompressionStream("gzip");
+        const pipedStream = response.body.pipeThrough(decompressionStream);
+    
+        const reader = pipedStream.getReader();
+        const decoder = new TextDecoder();
+    
+        let result = '';
+        let complete = false;
+        while (!complete) {
+            const { value, done } = await reader.read();
+            if (value) {
+                result += decoder.decode(value);
+            }
+            complete = done;
+        }
+        return JSON.parse(result);
     }
 
-    system = (await response.json()).data;
-
-    const limit = 20;
-    let page = 1;
-    system.waypoints = [];
-    do {
-        response = await fetch(`https://api.spacetraders.io/v2/systems/${system.symbol}/waypoints?limit=${limit}&page=${page}`);
+    static async fetchSystem(systemSymbol) {
+        const response = await fetch(`https://api.spacetraders.io/v2/systems/${systemSymbol}`);
         if (response.status == 404) {
             throw "Could not load system data.";
         }
-        json = await response.json();
-        system.waypoints.push(...json.data);
-        page++;
-    } while (json.meta.page < json.meta.total / json.meta.limit);
-
-    let waypointMap = {
-        [system.symbol]: system
-    };
-    system.children = [];
-    system.waypoints.forEach(w => {
-        waypointMap[w.symbol] = w;
-        w.children = [];
-    });
-
-    system.waypoints.forEach(w => {
-        // point at star
-        if (w.orbits == null) w.orbits = system.symbol;
-
-        // add children to parent
-        waypointMap[w.orbits].children.push(w);
-
-        // set parent
-        w.parent = waypointMap[w.orbits];
-    });
-
-    const renderables = []
-    renderables.push(
-        {
-            worldX: 0,
-            worldY: 0,
-            tooltipRange: 20,
-            tooltipText: `${system.symbol} ${system.type}`,
-            render: (canvas, ctx) => renderSystem(canvas, ctx, system, Vector.create(0, 0)),
-            system: system
-        }
-    );
-    for (const waypoint of Object.values(waypointMap).filter(w => w.orbits == system.symbol)) {
-        renderables.push(
-            {
-                worldX: waypoint.x,
-                worldY: waypoint.y,
-                tooltipRange: 20,
-                tooltipText: `${waypoint.symbol} ${waypoint.type} [${waypoint.traits.map(t => t.name).join(", ")}]`,
-                render: (canvas, ctx) => renderWaypoint(canvas, ctx, waypoint, Vector.create(waypoint.x, waypoint.y)),
-                click: waypoint.children.length > 0 ? (event) => {
-                    const canvas = event.currentTarget;
-                    let eventCopy = copyEvent(event);
-                    getWaypointRenderables(canvas.nearestRenderable.waypoint)
-                        .then(renderables => pushWorld(canvas, renderables))
-                        .then(() => canvasMouseMove(eventCopy));
-                } : undefined,
-                waypoint: waypoint
+    
+        const system = (await response.json()).data;
+    
+        const limit = 20;
+        let page = 1;
+        let json = null;
+        system.waypoints = [];
+        do {
+            const response = await fetch(`https://api.spacetraders.io/v2/systems/${system.symbol}/waypoints?limit=${limit}&page=${page}`);
+            if (response.status == 404) {
+                throw "Could not load system data.";
             }
-        );
-    }
+            json = await response.json();
+            system.waypoints.push(...json.data);
+            page++;
+        } while (json.meta.page < json.meta.total / json.meta.limit);
+    
+        let waypointMap = {
+            [system.symbol]: system
+        };
+        system.children = [];
+        system.waypoints.forEach(w => {
+            waypointMap[w.symbol] = w;
+            w.children = [];
+        });
+    
+        system.waypoints.forEach(w => {
+            // point at star
+            if (w.orbits == null) w.orbits = system.symbol;
+    
+            // add children to parent
+            waypointMap[w.orbits].children.push(w);
+    
+            // set parent
+            w.parent = waypointMap[w.orbits];
+        });
 
-    return { renderables: renderables };
-}
-
-function renderWaypoint(canvas, ctx, waypoint, pos, skipCount) {
-    const screenPos = worldToScreen(canvas, pos);
-
-    // draw the orbit
-    ctx.beginPath();
-    const parentPos = worldToScreen(canvas, Vector.create(0, 0));
-    ctx.arc(
-        parentPos.x,
-        parentPos.y,
-        Vector.magnitude(Vector.sub(screenPos, parentPos)),
-        0,
-        2 * Math.PI);
-    ctx.strokeStyle = rgb(32, 32, 32);
-    ctx.closePath();
-    ctx.stroke();
-
-    // draw the waypoint
-    let radius = 4;
-    ctx.beginPath();
-    ctx.arc(
-        screenPos.x,
-        screenPos.y,
-        radius,
-        0,
-        2 * Math.PI);
-    ctx.closePath();
-    ctx.strokeStyle = "white";
-    ctx.strokeWidth = 2;
-    switch (waypoint.type) {
-        default:
-            ctx.fillStyle = rgb(0, 0, 255);
-            break;
-    }
-    ctx.stroke();
-    ctx.fill();
-
-    // draw the number of children if there are
-    if (!skipCount && waypoint.children.length > 0) {
-        ctx.fillStyle = "white";
-        ctx.font = "12px Arial";
-        ctx.fillText(waypoint.orbitals.length + 1, screenPos.x + 5, screenPos.y - 10);
+        // if (system.children[0]) {
+        //     for (let i = 0; i < 20; i++) {
+        //         system.children[0].children.push({
+        //             "systemSymbol": system.children[0].systemSymbol,
+        //             "symbol": "test " + i,
+        //             "type": "MOON",
+        //             "x": system.children[0].x,
+        //             "y": system.children[0].y,
+        //             "orbitals": [],
+        //             "traits": [{symbol: "TEST", name: "test"}],
+        //             "faction": [],
+        //             parent: system.children[0],
+        //             children: []
+        //         });
+        //     }
+        // }            
+    
+        return system;
     }
 }
 
-async function getGalaxyRenderables() {
-    const response = await fetch("data/systems.json.gz");
-    if (response.status == 404) {
-        throw "Could not load systems.";
+class Renderable {
+    getAbsoluteWorldPos() {
+        throw "Not implemented";
     }
 
-    const decompressionStream = new DecompressionStream("gzip");
-    const pipedStream = response.body.pipeThrough(decompressionStream);
+    getScreenPos(world) {
+        throw "Not implemented";
+    }
 
-    const reader = pipedStream.getReader();
-    const decoder = new TextDecoder();
+    render(ctx, pass, world) {     
+        throw "Not implemented";
+    }
 
-    let result = '';
-    let complete = false;
-    while (!complete) {
-        const { value, done } = await reader.read();
-        if (value) {
-            result += decoder.decode(value);
+    getScreenHitRadius() {
+        throw "Not implemented";
+    }
+
+    getTooltipText() {
+        throw "Not implemented";
+    }
+}
+
+class RenderableSystem extends Renderable {
+    static radius = 4;
+
+    constructor(system, asOrigin) {
+        super();
+        this.system = system;
+        this.asOrigin = asOrigin;
+    }
+
+    getAbsoluteWorldPos() {
+        if (this.asOrigin) return Vector.create(0, 0);
+        return Vector.create(this.system.x, this.system.y);
+    }
+
+    getScreenPos(world) {
+        if (!this.asOrigin)
+            return world.worldToScreen(Vector.create(this.system.x, this.system.y));
+
+        return world.worldToScreen(Vector.create(0, 0));
+    }
+
+    getScreenHitRadius() {
+        return RenderableSystem.radius * 4;
+    }
+
+    getTooltipText() {
+        return `${this.system.symbol} ${this.system.type}`;
+    }        
+
+    render(ctx, pass, world) {
+        if (pass == 0) return true;
+
+        const screenPos = this.getScreenPos(world);
+
+        // draw the system
+        ctx.beginPath();
+        ctx.arc(
+            screenPos.x,
+            screenPos.y,
+            RenderableSystem.radius,
+            0,
+            2 * Math.PI);
+        ctx.closePath();
+        ctx.strokeWidth = 2;
+        const starColor = world.getOption('starColor');
+        if (starColor == 'type') {
+            this.setStyleBySystemType(ctx);
+        } else if (starColor == 'faction') {
+            this.setStyleBySystemFaction(ctx);
+        } else if (starColor == 'waypoints') {
+            this.setStyleBySystemWaypoints(ctx);
         }
-        complete = done;
-    }
-    const systems = JSON.parse(result);
-
-    const renderables = []
-    for (const system of systems) {
-        renderables.push(
-            {
-                worldX: system.x,
-                worldY: system.y,
-                tooltipRange: 20,
-                tooltipText: `${system.symbol} ${system.type}`,
-                render: (canvas, ctx) => renderSystem(canvas, ctx, system, Vector.create(system.x, system.y)),
-                click: (event) => {
-                    const canvas = event.currentTarget;
-                    let eventCopy = copyEvent(event);
-                    getSystemRenderables(canvas.nearestRenderable.system)
-                        .then(renderables => pushWorld(canvas, renderables))
-                        .then(() => canvasMouseMove(eventCopy));
-                },
-                system: system
-            }
-        )
+        ctx.stroke();
+        ctx.fill();
     }
 
-    return { renderables: renderables };
-}
+    setStyleBySystemWaypoints(ctx) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        const waypointCount = this.system.waypoints?.length ?? 0;
+        if (waypointCount <= 0) {
+            ctx.fillStyle = rgb(0, 0, 0);
+        } else if (waypointCount <= 3) {
+            ctx.fillStyle = rgb(16, 32, 16);
+        } else if (waypointCount <= 9) {
+            ctx.fillStyle = rgb(32, 64, 32);
+        } else {
+            ctx.fillStyle = rgb(48, 128, 48);
+        }
+    }        
 
-function renderSystem(canvas, ctx, system, pos) {
-    const screenPos = worldToScreen(canvas, pos);
-
-    // draw the system
-    let radius = 4;
-    ctx.beginPath();
-    ctx.arc(
-        screenPos.x,
-        screenPos.y,
-        radius,
-        0,
-        2 * Math.PI);
-    ctx.closePath();
-    ctx.strokeWidth = 2;
-    if (canvas.starColor == 'type') {
+    setStyleBySystemType(ctx) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        switch (system.type) {
+        switch (this.system.type) {
             case "BLUE_STAR":
                 ctx.fillStyle = rgb(0, 0, 128);
                 break;
@@ -500,12 +415,14 @@ function renderSystem(canvas, ctx, system, pos) {
             default:
                 throw "Unknown system type: " + system.type;
         }
-    } else if (canvas.starColor == 'faction') {
+    }
+
+    setStyleBySystemFaction(ctx) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
-        if (system.factions?.length > 1) {
-            console.log('multiple factions: ' + JSON.stringify(system));
+        if (this.system.factions?.length > 1) {
+            throw 'multiple factions: ' + JSON.stringify(this.system);
         }
-        const faction = system.factions[0]?.symbol ?? null;
+        const faction = this.system.factions[0]?.symbol ?? null;
         switch (faction) {
             // Reds
             case "QUANTUM":
@@ -542,21 +459,236 @@ function renderSystem(canvas, ctx, system, pos) {
                 console.log("Unknown system faction: " + faction);
                 break;
         }
-    } else if (canvas.starColor == 'waypoints') {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-        const waypointCount = system.waypoints?.length ?? 0;
-        if (waypointCount <= 0) {
-            ctx.fillStyle = rgb(0, 0, 0);
-        } else if (waypointCount <= 3) {
-            ctx.fillStyle = rgb(16, 32, 16);
-        } else if (waypointCount <= 9) {
-            ctx.fillStyle = rgb(32, 64, 32);
-        } else {
-            ctx.fillStyle = rgb(48, 128, 48);
+    }
+}
+
+class RenderableWaypoint extends Renderable {
+    static radius = 6;
+
+    constructor(waypoint) {
+        super();
+        this.waypoint = waypoint;
+    }
+
+    getAbsoluteWorldPos() {
+        return Vector.create(this.waypoint.x, this.waypoint.y);
+    }
+    
+    getScreenPos(world) {
+        let system = this.waypoint;
+        while (system.parent != null) system = system.parent;
+
+        // if this is a top level waypoint, it's just world to screen
+        if (this.waypoint.parent == system)
+            return world.worldToScreen(Vector.create(this.waypoint.x, this.waypoint.y));
+
+        
+        // For children, it's screenspace offset from parent    
+        if (this.waypoint.parent != null && this.waypoint.parent != system) {
+            // If the renderable has a parent, and it's not the star, it's a moon or something
+            // as such, offset the screen position by the index in the parent's children
+
+            const parentPos = world.worldToScreen(Vector.create(this.waypoint.parent.x, this.waypoint.parent.y));
+            const idx = this.waypoint.parent.children.indexOf(this.waypoint);
+            const idxToSin = (idx * Math.PI * 2 * 0.12);
+            const idxToMult = (RenderableWaypoint.radius * 4) + (idx * RenderableWaypoint.radius * 1);
+
+            const offset = Vector.mult(Vector.create(Math.cos(idxToSin), Math.sin(idxToSin)), -idxToMult);
+            return Vector.add(parentPos, offset);
+        }
+        else
+        {
+            return world.worldToScreen(Vector.create(this.waypoint.x, this.waypoint.y));
         }
     }
-    ctx.stroke();
-    ctx.fill();
+
+    getScreenHitRadius() {
+        return RenderableWaypoint.radius * 4;
+    }
+
+    getTooltipText() {
+        return `${this.waypoint.symbol} ${this.waypoint.type} [${this.waypoint.traits.map(t => t.name).join(", ")}]`;
+    }        
+
+    render(ctx, pass, world) {
+        const screenPos = this.getScreenPos(world);
+
+        let system = this.waypoint;
+        while (system.parent != null) system = system.parent;
+
+        // draw the orbit only if the parent is the star
+        if (pass == 0 && this.waypoint.parent != null) {
+            ctx.beginPath();
+            let originPos;
+            if (this.waypoint.parent == system) {
+                originPos = world.worldToScreen(Vector.create(0, 0));
+            }
+            else {
+                originPos = world.worldToScreen(Vector.create(this.waypoint.parent.x, this.waypoint.parent.y));
+            }
+            ctx.arc(
+                originPos.x,
+                originPos.y,
+                Vector.magnitude(Vector.sub(screenPos, originPos)),
+                0,
+                2 * Math.PI);
+            ctx.strokeWidth = 1;
+            ctx.strokeStyle = "rgb(32, 32, 32)";
+            ctx.closePath();
+            ctx.stroke();
+        }
+
+        if (pass == 0) return true;
+
+        // draw the waypoint
+        ctx.beginPath();
+        ctx.arc(
+            screenPos.x,
+            screenPos.y,
+            RenderableWaypoint.radius,
+            0,
+            2 * Math.PI);
+        ctx.closePath();
+        ctx.strokeWidth = 2;
+        ctx.strokeStyle = "rgb(255, 255, 255)";
+        switch (this.waypoint.type) {
+            default:
+                ctx.fillStyle = "rgb(0, 0, 255)";
+                break;
+        }
+        ctx.stroke();
+        ctx.fill();
+    }
+}
+
+async function delay(ms) {
+    await new Promise(r => setTimeout(r, ms));
+}
+
+class World {
+    /** @param {Renderable[]} renderables */
+    constructor(renderables, globalOptions) {
+        this.renderables = renderables;
+        this.options = {
+            global: globalOptions
+        }
+
+        this.scale = 1;
+        this.offset = Vector.create(0, 0);
+        this.computeWorldBounds();
+    }
+
+    computeWorldBounds() {
+        this.worldMin = Vector.create(Number.MAX_VALUE, Number.MAX_VALUE);
+        this.worldMax = Vector.create(Number.MIN_VALUE, Number.MIN_VALUE);
+        for (const renderable of this.renderables) {
+            const pos = renderable.getAbsoluteWorldPos();
+            this.worldMin.x = Math.min(this.worldMin.x, pos.x);
+            this.worldMax.x = Math.max(this.worldMax.x, pos.x);
+            this.worldMin.y = Math.min(this.worldMin.y, pos.y);
+            this.worldMax.y = Math.max(this.worldMax.y, pos.y);
+        }
+    
+        if (this.worldMin.x == Number.MAX_VALUE) this.worldMin.x = -1;
+        if (this.worldMin.y == Number.MAX_VALUE) this.worldMin.y = -1;
+        if (this.worldMax.x == Number.MIN_VALUE) this.worldMax.x = 1;
+        if (this.worldMax.y == Number.MIN_VALUE) this.worldMax.y = 1;
+    }
+
+    setFullView(margins, canvas) {
+        // identity
+        this.offset = Vector.create(0, 0);
+        this.scale = 1;
+    
+        const screenPointMin = Vector.create(0, 0);
+        const screenPointMax = Vector.create(canvas.width, canvas.height);
+
+        const screenPointMinWithMargin = Vector.add(screenPointMin, margins);
+        const screenPointMaxWithMargin = Vector.sub(screenPointMax, margins);
+    
+        // Compute the scale based on the ratio of screen distances to world distances
+        const screenDist = Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin);
+        const worldDist = Vector.sub(this.worldMax, this.worldMin);
+        const scaleX = screenDist.x / worldDist.x;
+        const scaleY = screenDist.y / worldDist.y;
+        this.scale = Math.min(scaleX, scaleY);
+    
+        // Offset is the world center distance from the screen center
+        const screenCenter = Vector.add(screenPointMinWithMargin, Vector.div(Vector.sub(screenPointMaxWithMargin, screenPointMinWithMargin), 2));
+        const worldCenter = Vector.add(this.worldMin, Vector.div(Vector.sub(this.worldMax, this.worldMin), 2));
+        this.offset = Vector.sub(worldCenter, this.screenToWorld(screenCenter));
+    }
+
+    screenToWorld(pos) {
+        pos = Vector.div(pos, this.scale);
+        pos = Vector.add(pos, this.offset);
+        return pos;
+    }
+    
+    worldToScreen(pos) {
+        pos = Vector.sub(pos,  this.offset);
+        pos = Vector.mult(pos, this.scale);
+        return pos;
+    }
+
+    render(ctx) {
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        let pass = 0;
+        let needPass = this.renderables ?? [];
+        do {
+            let thisPass = needPass;
+            needPass = [];
+            for (const renderable of thisPass) {
+                if (renderable.render(ctx, pass, this)) {
+                    needPass.push(renderable);
+                }
+            }
+            pass++;
+        } while (needPass.length > 0);
+    }
+
+    getOption(optionName) {
+        return this.options[optionName] ?? this.options.global[optionName];
+    }
+
+    click(event) {
+    }
+}
+
+class SystemWorld extends World {
+}
+
+class GalaxyWorld extends World {
+    click(event) {
+        const canvas = event.currentTarget;
+        if (canvas.hoverRenderable == null) return;
+
+        canvas.worldCache = canvas.worldCache ?? {};
+        const world = canvas.worldCache[canvas.hoverRenderable.system.symbol];
+        if (world) {
+            pushWorld(canvas, world);
+            return;
+        }
+
+        Api.fetchSystem(canvas.hoverRenderable.system.symbol)
+            .then(system => {
+                const renderables = [];
+                renderables.push(new RenderableSystem(system, true));
+                function addChildren(waypoint) {
+                    waypoint.children.forEach(w => {
+                        renderables.push(new RenderableWaypoint(w))
+                        addChildren(w);
+                    });
+                }
+                addChildren(system);
+
+                const world = new SystemWorld(renderables, canvas.gameOptions);
+                const margins = Vector.create(150, 150);
+                world.setFullView(margins, canvas);
+                canvas.worldCache[system.symbol] = world;
+                pushWorld(canvas, world);
+            });        
+    }
 }
 
 async function hashString(str) {
