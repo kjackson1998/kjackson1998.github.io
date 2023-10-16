@@ -8,8 +8,9 @@ function windowLoad(event) {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
+    const clientRect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = clientRect.width;
+    canvas.height = clientRect.height;
     canvas.isMouseDown = false;
     canvas.lastMouse = null;
     canvas.worldStack = [];
@@ -20,46 +21,40 @@ function windowLoad(event) {
     canvas.addEventListener("mousemove", canvasMouseMove);
     canvas.addEventListener("wheel", canvasMouseWheel);
     canvas.addEventListener("contextmenu", canvasMouseRightClick);
-    window.addEventListener("resize", event => windowResize(event, canvas));
-
-    let contentDiv = this.document.getElementById('content');
-    let starColorSelector = contentDiv.querySelector('#starColorSelector');
-    if (starColorSelector) {
-        contentDiv.removeChild(starColorSelector);
-    }
-    starColorSelector = Object.assign(this.document.createElement('div'), {
-        className: 'radioBar'
+    const resizeObserver = new ResizeObserver(entries => {
+        for (let entry of entries) {
+            if (entry.target == canvas.parentElement) {
+                canvasResize(canvas);
+            }
+        }
     });
-    contentDiv.prepend(starColorSelector);
-    starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
-        innerText: 'star color',
-        className: 'header'
-    }));
-    function selectStarColor(event) {
-        canvas.gameOptions.starColor = event.currentTarget.innerText;
-        event.currentTarget.parentNode.querySelectorAll('.button')
-            .forEach(b => b.classList.remove('selected'));
-        event.currentTarget.classList.add('selected');
+    resizeObserver.observe(canvas.parentElement);
+
+    window.addEventListener('keypress', windowKeyPress);
+      
+    let starColorSelector = this.document.getElementById('starColorSelector');
+    starColorSelector.querySelectorAll('.button').forEach(b => b.addEventListener('click', selectStarColor));
+    restoreStarColor(starColorSelector);
+
+    let authKeyInput = this.document.getElementById('authKeyInput');
+    if (window.localStorage) {
+        authKey = window.localStorage.getItem('authKey');
+        if (authKey) {
+            authKeyInput.value = authKey;
+            Api.authKey = authKey;
+        }
     }
-    let d = starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
-        innerText: 'type',
-        className: 'button',
-        onclick: selectStarColor
-    }));
-    starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
-        innerText: 'faction',
-        className: 'button',
-        onclick: selectStarColor
-    }));
-        starColorSelector.appendChild(Object.assign(this.document.createElement('div'), {
-        innerText: 'waypoints',
-        className: 'button',
-        onclick: selectStarColor
-    }));
-    d.click();
+    authKeyInput.addEventListener('input', event => {
+        window.localStorage.setItem('authKey', event.currentTarget.value);
+        Api.authKey = event.currentTarget.value;
+    });
 
-    requestAnimationFrame(() => render(canvas, ctx));
 
+    populateShipList();
+
+    requestAnimationFrame(() => render(ctx));
+
+    const safeEvent = copyEvent(event);
     Api.fetchGalaxy()
         .then(systems => {
             const world = new GalaxyWorld(
@@ -71,17 +66,79 @@ function windowLoad(event) {
                 margins,
                 canvas);
             pushWorld(canvas, world);
+            canvasMouseMove(safeEvent)
         });
 }
 
-function windowResize(event, canvas) {
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
+function populateShipList() {
+    let shipListShipNameTemplate = this.document.getElementById('shipListShipNameTemplate');
+    let shipListShipCargoTemplate = this.document.getElementById('shipListShipCargoTemplate');
+    let shipListShipFuelTemplate = this.document.getElementById('shipListShipFuelTemplate');
+    let shipListShipCooldownTemplate = this.document.getElementById('shipListShipCooldownTemplate');
+    
+    let shipList = this.document.getElementById('shipList');
+
+    for (let i = 0; i < 15; i++)
+    {
+        let newNameNode = this.document.importNode(shipListShipNameTemplate.content, true);
+        newNameNode.querySelector('.shipListShipName').innerText = `Ship ${i}`;
+        shipList.appendChild(newNameNode);
+
+        let newCargoNode = this.document.importNode(shipListShipCargoTemplate.content, true);
+        newCargoNode.querySelector('.shipListShipCargoUnits').innerText = `0`;
+        newCargoNode.querySelector('.shipListShipCargoCapacity').innerText = `100`;
+        shipList.appendChild(newCargoNode);
+
+        let newFuelNode = this.document.importNode(shipListShipFuelTemplate.content, true);
+        newFuelNode.querySelector('.shipListShipFuelCurrent').innerText = `100`;
+        newFuelNode.querySelector('.shipListShipFuelCapacity').innerText = `9999`;
+        shipList.appendChild(newFuelNode);
+
+        let newCooldownNode = this.document.importNode(shipListShipCooldownTemplate.content, true);
+        newCooldownNode.querySelector('.shipListShipCooldownRemaining').innerText = `0`;
+        newCooldownNode.querySelector('.shipListShipCooldownTotal').innerText = `0`;
+        shipList.appendChild(newCooldownNode);
+    }
+}
+
+function restoreStarColor(starColorSelector) {
+    if (!window.localStorage) return;
+
+    const starColor = window.localStorage.getItem('starColor');
+    Array.from(starColorSelector.querySelectorAll('.button'))
+        .find(b => b.innerText == starColor)
+        .click();
+}
+
+function selectStarColor(event) {
+    canvas.gameOptions.starColor = event.currentTarget.innerText;
+    event.currentTarget.parentNode.querySelectorAll('.button')
+        .forEach(b => b.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+    if (window.localStorage) {
+        window.localStorage.setItem('starColor', event.currentTarget.innerText);
+    }
+}
+
+function canvasResize(canvas) {
+    const clientRect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = clientRect.width;
+    canvas.height = clientRect.height;
 
     if (canvas.world == null) return;
     const oldCornerPos = canvas.world.screenToWorld(Vector.create(0, 0));
     const newCornerPos = canvas.world.screenToWorld(Vector.create(0, 0));
     canvas.world.offset = Vector.add(canvas.world.offset, Vector.sub(newCornerPos, oldCornerPos));
+}
+
+function windowKeyPress(event) {
+    if (event.code == 'KeyS') {
+        const control = this.document.querySelector('.mainControlSide');
+        if (control.classList.contains('hidden'))
+            control.classList.remove('hidden');
+        else
+        control.classList.add('hidden');
+    }
 }
 
 function canvasMouseClick(event) {
@@ -103,9 +160,10 @@ async function canvasMouseRightClick(event) {
 
 function canvasMouseDown(event) {
     const canvas = event.currentTarget;
+    const mousePos = eventMousePos(event);
     if (event.button === 0) {
         canvas.isMouseDown = Date.now();
-        canvas.lastMouse = Vector.create(event.clientX, event.clientY);
+        canvas.lastMouse = mousePos;
         canvas.mouseMoved = false;
     }
 };
@@ -122,36 +180,43 @@ function canvasMouseUp(event) {
     }
 };
 
+function eventMousePos(event) {
+    if (event.clientX == null) return Vector.create(event.clientX, event.clientY);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const eventPos = Vector.create(event.clientX - rect.left, event.clientY - rect.top);
+    return eventPos;
+}
+
 function canvasMouseWheel(event) {
     const canvas = event.currentTarget;
+    const mousePos = eventMousePos(event);
     if (canvas.world != null) {
-        const oldWorld = canvas.world.screenToWorld(Vector.create(event.clientX, event.clientY));
+        const oldWorld = canvas.world.screenToWorld(mousePos);
         for (i = 0; i < Math.abs(event.deltaY); i++) {
             if (event.deltaY < 0)
                 canvas.world.scale *= 1.001;
             else
                 canvas.world.scale *= 0.999;
         }
-        const newWorld = canvas.world.screenToWorld(Vector.create(event.clientX, event.clientY));
+        const newWorld = canvas.world.screenToWorld(mousePos);
         canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
     }
-};
+}
 
 function canvasMouseMove(event) {
+    const mousePos = eventMousePos(event);
     const canvas = event.currentTarget;
     if (canvas.isMouseDown) {
-        const eventPos = Vector.create(event.clientX, event.clientY)
         if (canvas.world != null) {
             const oldWorld = canvas.world.screenToWorld(canvas.lastMouse);
-            const newWorld = canvas.world.screenToWorld(eventPos);
+            const newWorld = canvas.world.screenToWorld(mousePos);
             canvas.world.offset = Vector.sub(canvas.world.offset, Vector.sub(newWorld, oldWorld));
         }
-        canvas.lastMouse = eventPos;
+        canvas.lastMouse = mousePos;
         canvas.mouseMoved = true;
     }
 
     if (canvas.world != null) {
-        const mousePos = Vector.create(event.clientX, event.clientY);
         let nearestSquaredDist = Number.MAX_VALUE;
         let nearestRenderable = null;
         for (const renderable of canvas.world.renderables) {
@@ -191,17 +256,110 @@ function popWorld(canvas) {
     canvas.world = canvas.worldStack.pop();
 }
 
-function render(canvas, ctx) {
-    requestAnimationFrame(() => render(canvas, ctx));
+function render(ctx) {
+    requestAnimationFrame(() => render(ctx));
 
-    if (canvas.world != null) {
-        canvas.world.render(ctx);
+    if (ctx.canvas.world != null) {
+        ctx.canvas.world.render(ctx);
     } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     }
+
+    renderDebug(ctx);
+}
+
+function renderDebug(ctx) {
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    renderDebugTarget(ctx, Vector.create(0, 0));
+    renderDebugTarget(ctx, Vector.create(width, 0));
+    renderDebugTarget(ctx, Vector.create(0, height));
+    renderDebugTarget(ctx, Vector.create(width, height));
+    renderDebugTarget(ctx, Vector.create(width/2, height/2));
+    renderDebugTarget(ctx, Vector.create(width-1, height/2));
+    renderDebugTarget(ctx, Vector.create(width/2, height-1));
+}
+
+function renderDebugTarget(ctx, pos) {
+    pos.x += 0.5;
+    pos.y += 0.5;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 13, 0, 2 * Math.PI);
+    ctx.moveTo(pos.x - 20, pos.y);
+    ctx.lineTo(pos.x + 20, pos.y);
+    ctx.moveTo(pos.x + 20, pos.y);
+    ctx.lineTo(pos.x - 20, pos.y);
+    ctx.moveTo(pos.x, pos.y - 20);
+    ctx.lineTo(pos.x, pos.y + 20);
+    ctx.moveTo(pos.x, pos.y + 20);
+    ctx.lineTo(pos.x, pos.y - 20);
+    ctx.closePath();
+
+    ctx.strokeWidth = 1;
+    ctx.strokeStyle = rgb(255, 0, 255);
+    ctx.stroke();
 }
 
 class Api {
+    static baseUrl = "https://api.spacetraders.io/v2/";
+    static authKey = null;
+
+    static fixBase(url) {
+        try {
+            new URL(url);
+            return url;
+        }
+        catch (error) {
+            return Api.baseUrl + url;
+        }
+    }
+
+    static async callApiPaged(url, method, bodyJsonObj) {
+        url = this.fixBase(url);
+
+        const data = [];
+        const limit = 20;
+        let page = 1;
+        let json;
+        do {
+            url = new URL(url);
+            url.searchParams.set('limit', limit);
+            url.searchParams.set('page', page);
+            url = url.toString();
+
+            const response = await Api.callApi(url, method, bodyJsonObj)
+            if (response.status == 404) {
+                throw "Could not load data from " + url;
+            }
+            json = await response.json();
+            data.push(...json.data);
+            page++;
+        } while (json.meta.page < json.meta.total / json.meta.limit);
+
+        return data;
+    }
+
+    static async callApi(url, method, bodyJsonObj) {
+        url = this.fixBase(url);
+
+        const headers = {
+            "Accept": "application/json"
+        }
+        if (Api.authKey) {
+            headers["Authorization"] = "Bearer " + Api.authKey;
+        }
+        const options = {
+            headers: headers,
+        };
+        if (method) {
+            options.method = method
+        }
+        if (bodyJsonObj) {
+            options.body = JSON.stringify(bodyJsonObj);
+        }
+        return await fetch(url, options);
+    }
+
     static async fetchGalaxy() {
         const response = await fetch("data/systems.json.gz");
         if (response.status == 404) {
@@ -227,45 +385,27 @@ class Api {
     }
 
     static async fetchSystem(systemSymbol) {
-        const response = await fetch(`https://api.spacetraders.io/v2/systems/${systemSymbol}`);
-        if (response.status == 404) {
-            throw "Could not load system data.";
+        const response = await Api.callApi(`systems/${systemSymbol}`);
+        if (response.status != 200) {
+            throw "Could not load system data: " + await response.text();
         }
+        const json = await response.json();
+        const system = json.data;
+
+        system.waypoints = await Api.callApiPaged(`systems/${system.symbol}/waypoints`)
     
-        const system = (await response.json()).data;
-    
-        const limit = 20;
-        let page = 1;
-        let json = null;
-        system.waypoints = [];
-        do {
-            const response = await fetch(`https://api.spacetraders.io/v2/systems/${system.symbol}/waypoints?limit=${limit}&page=${page}`);
-            if (response.status == 404) {
-                throw "Could not load system data.";
-            }
-            json = await response.json();
-            system.waypoints.push(...json.data);
-            page++;
-        } while (json.meta.page < json.meta.total / json.meta.limit);
-    
-        let waypointMap = {
-            [system.symbol]: system
-        };
-        system.children = [];
+        let waypointMap = { [system.symbol]: system };
+        system.waypoints.forEach(w => waypointMap[w.symbol] = w);
+
+        Object.values(waypointMap).forEach(w => w.children = []);
         system.waypoints.forEach(w => {
-            waypointMap[w.symbol] = w;
-            w.children = [];
-        });
+            // get parent symbol
+            let parentSymbol = w.orbits;
+            if (parentSymbol == null) parentSymbol = system.symbol;
     
-        system.waypoints.forEach(w => {
-            // point at star
-            if (w.orbits == null) w.orbits = system.symbol;
-    
-            // add children to parent
-            waypointMap[w.orbits].children.push(w);
-    
-            // set parent
-            w.parent = waypointMap[w.orbits];
+            // add parent-child
+            w.parent = waypointMap[parentSymbol];
+            waypointMap[parentSymbol].children.push(w);
         });
 
         // if (system.children[0]) {
@@ -362,13 +502,25 @@ class RenderableSystem extends Renderable {
             this.setStyleBySystemFaction(ctx);
         } else if (starColor == 'waypoints') {
             this.setStyleBySystemWaypoints(ctx);
+        } else if (starColor == 'jumpgates') {
+            this.setStyleBySystemJumpgates(ctx);
         }
         ctx.stroke();
         ctx.fill();
     }
 
+    setStyleBySystemJumpgates(ctx) {
+        ctx.strokeStyle = rgba(255, 255, 255, 0.5);
+        const hasJumpgate = this.system.waypoints.some(w => w.type == 'JUMP_GATE');
+        if (hasJumpgate) {
+            ctx.fillStyle = rgb(48, 128, 48);
+        } else {
+            ctx.fillStyle = rgb(0, 0, 0);
+        }
+    }        
+
     setStyleBySystemWaypoints(ctx) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.strokeStyle = rgba(255, 255, 255, 0.5);
         const waypointCount = this.system.waypoints?.length ?? 0;
         if (waypointCount <= 0) {
             ctx.fillStyle = rgb(0, 0, 0);
@@ -382,7 +534,7 @@ class RenderableSystem extends Renderable {
     }        
 
     setStyleBySystemType(ctx) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.strokeStyle = rgba(255, 255, 255, 0.1);
         switch (this.system.type) {
             case "BLUE_STAR":
                 ctx.fillStyle = rgb(0, 0, 128);
@@ -397,7 +549,7 @@ class RenderableSystem extends Renderable {
                 ctx.fillStyle = rgb(192, 192, 192);
                 break;
             case "BLACK_HOLE":
-                ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+                ctx.strokeStyle = rgba(255, 255, 255, 1);
                 ctx.fillStyle = rgb(0, 0, 0);
                 break;
             case "UNSTABLE":
@@ -418,7 +570,7 @@ class RenderableSystem extends Renderable {
     }
 
     setStyleBySystemFaction(ctx) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+        ctx.strokeStyle = rgba(255, 255, 255, 1);
         if (this.system.factions?.length > 1) {
             throw 'multiple factions: ' + JSON.stringify(this.system);
         }
@@ -451,8 +603,8 @@ class RenderableSystem extends Renderable {
                 break;
 
             case null:
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-                ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+                ctx.strokeStyle = rgba(255, 255, 255, 0.2);
+                ctx.fillStyle = rgba(0, 0, 0, 0);
                 break;
             default:
                 ctx.fillStyle = rgb(255, 255, 255);
@@ -490,10 +642,10 @@ class RenderableWaypoint extends Renderable {
 
             const parentPos = world.worldToScreen(Vector.create(this.waypoint.parent.x, this.waypoint.parent.y));
             const idx = this.waypoint.parent.children.indexOf(this.waypoint);
-            const idxToSin = (idx * Math.PI * 2 * 0.12);
+            const idxToSin = -(idx * ((Math.PI * 2) / 8.5));
             const idxToMult = (RenderableWaypoint.radius * 4) + (idx * RenderableWaypoint.radius * 1);
 
-            const offset = Vector.mult(Vector.create(Math.cos(idxToSin), Math.sin(idxToSin)), -idxToMult);
+            const offset = Vector.mult(Vector.create(Math.cos(idxToSin), Math.sin(idxToSin)), idxToMult);
             return Vector.add(parentPos, offset);
         }
         else
@@ -516,7 +668,7 @@ class RenderableWaypoint extends Renderable {
         let system = this.waypoint;
         while (system.parent != null) system = system.parent;
 
-        // draw the orbit only if the parent is the star
+        // draw the orbit only if there is a parent (the center star doesn't have an orbit)
         if (pass == 0 && this.waypoint.parent != null) {
             ctx.beginPath();
             let originPos;
@@ -533,9 +685,12 @@ class RenderableWaypoint extends Renderable {
                 0,
                 2 * Math.PI);
             ctx.strokeWidth = 1;
-            ctx.strokeStyle = "rgb(32, 32, 32)";
+            ctx.strokeStyle = rgb(64, 64, 64);
             ctx.closePath();
+            if (this.waypoint.parent == system)
+                ctx.setLineDash([10, 5]); // dashed lines for planets
             ctx.stroke();
+            ctx.setLineDash([]);
         }
 
         if (pass == 0) return true;
@@ -550,10 +705,10 @@ class RenderableWaypoint extends Renderable {
             2 * Math.PI);
         ctx.closePath();
         ctx.strokeWidth = 2;
-        ctx.strokeStyle = "rgb(255, 255, 255)";
+        ctx.strokeStyle = rgb(255, 255, 255);
         switch (this.waypoint.type) {
             default:
-                ctx.fillStyle = "rgb(0, 0, 255)";
+                ctx.fillStyle = rgb(0, 0, 255);
                 break;
         }
         ctx.stroke();
@@ -667,9 +822,11 @@ class GalaxyWorld extends World {
         const world = canvas.worldCache[canvas.hoverRenderable.system.symbol];
         if (world) {
             pushWorld(canvas, world);
+            canvasMouseMove(event);
             return;
         }
 
+        const safeEvent = copyEvent(event);
         Api.fetchSystem(canvas.hoverRenderable.system.symbol)
             .then(system => {
                 const renderables = [];
@@ -687,6 +844,7 @@ class GalaxyWorld extends World {
                 world.setFullView(margins, canvas);
                 canvas.worldCache[system.symbol] = world;
                 pushWorld(canvas, world);
+                canvasMouseMove(safeEvent);
             });        
     }
 }
@@ -723,4 +881,8 @@ function copyEvent(event) {
 
 function rgb(r, g, b) {
     return `rgb(${r},${g},${b})`;
+}
+
+function rgba(r, g, b, a) {
+    return `rgb(${r},${g},${b},${a})`;
 }
