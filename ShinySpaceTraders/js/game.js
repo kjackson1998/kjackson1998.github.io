@@ -105,6 +105,7 @@ function restoreStarColor(starColorSelector) {
     if (!window.localStorage) return;
 
     const starColor = window.localStorage.getItem('starColor');
+    if (!starColor) starColor = 'type';
     Array.from(starColorSelector.querySelectorAll('.button'))
         .find(b => b.innerText == starColor)
         .click();
