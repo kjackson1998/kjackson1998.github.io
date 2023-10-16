@@ -265,7 +265,7 @@ function render(ctx) {
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     }
 
-    renderDebug(ctx);
+    //renderDebug(ctx);
 }
 
 function renderDebug(ctx) {
@@ -588,6 +588,9 @@ class RenderableSystem extends Renderable {
             case "GALACTIC":
                 ctx.fillStyle = rgb(0, 64, 0);
                 break;
+            case "COBALT":
+                ctx.fillStyle = rgb(0, 192, 0);
+                break;
             case "ECHO":
                 ctx.fillStyle = rgb(0, 255, 0);
                 break;
@@ -596,11 +599,19 @@ class RenderableSystem extends Renderable {
             case "VOID":
                 ctx.fillStyle = rgb(0, 0, 64);
                 break;
+            case "AEGIS":
+                ctx.fillStyle = rgb(0, 0, 192);
+                break;
 
             // Yellows
             case "COSMIC":
                 ctx.fillStyle = rgb(64, 64, 0);
                 break;
+            case "OBSIDIAN":
+                ctx.fillStyle = rgb(192, 192, 0);
+                break;
+
+            // news
 
             case null:
                 ctx.strokeStyle = rgba(255, 255, 255, 0.2);
