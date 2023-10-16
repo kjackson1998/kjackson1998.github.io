@@ -31,24 +31,26 @@ function windowLoad(event) {
     resizeObserver.observe(canvas.parentElement);
 
     window.addEventListener('keypress', windowKeyPress);
-      
+
     let starColorSelector = this.document.getElementById('starColorSelector');
     starColorSelector.querySelectorAll('.button').forEach(b => b.addEventListener('click', selectStarColor));
     restoreStarColor(starColorSelector);
 
     let authKeyInput = this.document.getElementById('authKeyInput');
     if (window.localStorage) {
-        authKey = window.localStorage.getItem('authKey');
-        if (authKey) {
-            authKeyInput.value = authKey;
-            Api.authKey = authKey;
+        const authToken = parseAuthToken(window.localStorage.getItem('authKey'));
+        if (authToken) {
+            Api.authKey = authToken;
+            authKeyInput.value = authToken;
         }
     }
     authKeyInput.addEventListener('input', event => {
-        window.localStorage.setItem('authKey', event.currentTarget.value);
-        Api.authKey = event.currentTarget.value;
+        const authToken = parseAuthToken(event.currentTarget.value);
+        if (authToken) {
+            Api.authKey = authToken;
+            window.localStorage.setItem('authKey', authToken);
+        }
     });
-
 
     populateShipList();
 
@@ -69,6 +71,53 @@ function windowLoad(event) {
             canvasMouseMove(safeEvent)
         });
 }
+
+function parseAuthToken(authToken) {
+    function base64UrlToBase64(base64Url) {
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const padding = "==".slice(0, (3 - base64.length % 4) % 3);
+        return base64 + padding
+    }
+
+    function parseJwt(token) {
+        const tokenParts = token.split('.');
+        const jwt = {
+            header: JSON.parse(atob(base64UrlToBase64(tokenParts[0]))),
+            payload: JSON.parse(atob(base64UrlToBase64(tokenParts[1]))),
+            sig: base64UrlToBase64(tokenParts[2])
+        };
+
+        if ((jwt.sig?.length ?? 0) <= 0) {
+            throw "Invalid JWT - no signature";
+        }
+
+        return jwt;
+    }
+
+    try {
+        if (!authToken) throw 'No auth token';
+
+        const jwt = parseJwt(authToken);
+
+        const identifier = jwt.payload.identifier;
+        if ((identifier?.length ?? 0) <= 0) {
+            throw "Invalid JWT - no identifier"
+        }
+        if (jwt.payload.sub != 'agent-token') {
+            throw "Invalid JWT - not an agent token"
+        }
+
+        console.log('Hello, ' + identifier + '!');
+
+        return authToken;
+    }
+    catch (error) {
+        console.log(error);
+    }
+
+    return null;
+}
+
 
 function populateShipList() {
     let shipListShipNameTemplate = this.document.getElementById('shipListShipNameTemplate');
