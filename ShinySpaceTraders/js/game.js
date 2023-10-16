@@ -52,7 +52,10 @@ function windowLoad(event) {
         }
     });
 
-    populateShipList();
+    Api.fetchMyShips()
+        .then(ships => {
+            ships.forEach(s => addShip(s));
+        });
 
     requestAnimationFrame(() => render(ctx));
 
@@ -118,6 +121,38 @@ function parseAuthToken(authToken) {
     return null;
 }
 
+function humanSeconds(seconds) {
+    seconds = seconds ?? 0;
+    return seconds.toFixed(0) + 's';
+}
+
+function addShip(ship) {
+    let shipListShipNameTemplate = this.document.getElementById('shipListShipNameTemplate');
+    let shipListShipCargoTemplate = this.document.getElementById('shipListShipCargoTemplate');
+    let shipListShipFuelTemplate = this.document.getElementById('shipListShipFuelTemplate');
+    let shipListShipCooldownTemplate = this.document.getElementById('shipListShipCooldownTemplate');
+    
+    let shipList = this.document.getElementById('shipList');
+
+    let newNameNode = this.document.importNode(shipListShipNameTemplate.content, true);
+    newNameNode.querySelector('.shipListShipName').innerText = ship.symbol;
+    shipList.appendChild(newNameNode);
+
+    let newCargoNode = this.document.importNode(shipListShipCargoTemplate.content, true);
+    newCargoNode.querySelector('.shipListShipCargoUnits').innerText = ship.cargo.units;
+    newCargoNode.querySelector('.shipListShipCargoCapacity').innerText = ship.cargo.capacity;
+    shipList.appendChild(newCargoNode);
+
+    let newFuelNode = this.document.importNode(shipListShipFuelTemplate.content, true);
+    newFuelNode.querySelector('.shipListShipFuelCurrent').innerText = ship.fuel.current;
+    newFuelNode.querySelector('.shipListShipFuelCapacity').innerText = ship.fuel.capacity;
+    shipList.appendChild(newFuelNode);
+
+    let newCooldownNode = this.document.importNode(shipListShipCooldownTemplate.content, true);
+    newCooldownNode.querySelector('.shipListShipCooldownRemaining').innerText = humanSeconds(ship.cooldown.remainingSeconds);
+    newCooldownNode.querySelector('.shipListShipCooldownTotal').innerText = humanSeconds(ship.cooldown.totalSeconds);
+    shipList.appendChild(newCooldownNode);
+}
 
 function populateShipList() {
     let shipListShipNameTemplate = this.document.getElementById('shipListShipNameTemplate');
@@ -351,6 +386,68 @@ function renderDebugTarget(ctx, pos) {
 }
 
 class Api {
+    static constants = {
+        systemTypes: {
+            "BLUE_STAR": {
+                fillColor: rgb(0, 0, 128)
+            },
+            "RED_STAR": {
+                fillColor: rgb(64, 0, 0)
+            },
+            "ORANGE_STAR": {
+                fillColor: rgb(128, 64, 0)
+            },
+            "WHITE_DWARF": {
+                fillColor: rgb(192, 192, 192)
+            },
+            "BLACK_HOLE": {
+                strokeColor: rgb(255, 255, 255),
+                fillColor: rgb(0, 0, 0)
+            },
+            "UNSTABLE": {
+                fillColor: rgb(128, 0, 128)
+            },
+            "NEUTRON_STAR": {
+                fillColor: rgb(128, 128, 255)
+            },
+            "HYPERGIANT": {
+                fillColor: rgb(255, 128, 128)
+            },
+            "YOUNG_STAR": {
+                fillColor: rgb(0, 64, 0)
+            }
+        },
+        factions: {
+            "QUANTUM": {
+                fillColor: rgb(64, 0, 0)
+            },
+            "DOMINION": {
+                fillColor: rgb(255, 0, 0)
+            },
+            "GALACTIC": {
+                fillColor: rgb(0, 64, 0)
+            },
+            "COBALT": {
+                fillColor: rgb(0, 192, 0)
+            },
+            "ECHO": {
+                fillColor: rgb(0, 255, 0)
+            },
+            "VOID": {
+                fillColor: rgb(0, 0, 64)
+            },
+            "AEGIS": {
+                fillColor: rgb(0, 0, 192)
+            },
+            "COSMIC": {
+                fillColor: rgb(64, 64, 0)
+            },
+            "OBSIDIAN": {
+                fillColor: rgb(192, 192, 0)
+            }
+        }
+    }
+
     static baseUrl = "https://api.spacetraders.io/v2/";
     static authKey = null;
 
@@ -371,22 +468,25 @@ class Api {
         const limit = 20;
         let page = 1;
         let json;
+        let response;
         do {
             url = new URL(url);
             url.searchParams.set('limit', limit);
             url.searchParams.set('page', page);
             url = url.toString();
 
-            const response = await Api.callApi(url, method, bodyJsonObj)
-            if (response.status == 404) {
-                throw "Could not load data from " + url;
+            response = await Api.callApi(url, method, bodyJsonObj)
+            if (response.status != 200) {
+                response.pagedData = data
+                return response
             }
             json = await response.json();
             data.push(...json.data);
             page++;
         } while (json.meta.page < json.meta.total / json.meta.limit);
 
-        return data;
+        response.pagedData = data;
+        return response;
     }
 
     static async callApi(url, method, bodyJsonObj) {
@@ -434,15 +534,27 @@ class Api {
         return JSON.parse(result);
     }
 
-    static async fetchSystem(systemSymbol) {
-        const response = await Api.callApi(`systems/${systemSymbol}`);
+    static async fetchMyShips() {
+        const response = await Api.callApiPaged('my/ships');
         if (response.status != 200) {
-            throw "Could not load system data: " + await response.text();
+            throw "Could not load my ships: " + await response.text();
         }
-        const json = await response.json();
+        return response.pagedData;
+    }
+
+    static async fetchSystem(systemSymbol) {
+        const systemResponse = await Api.callApi(`systems/${systemSymbol}`);
+        if (systemResponse.status != 200) {
+            throw "Could not load system data: " + await systemResponse.text();
+        }
+        const json = await systemResponse.json();
         const system = json.data;
 
-        system.waypoints = await Api.callApiPaged(`systems/${system.symbol}/waypoints`)
+        const waypointResponse = await Api.callApiPaged(`systems/${system.symbol}/waypoints`);
+        if (systemResponse.status != 200) {
+            throw `Could not load ${systemSymbol} data: ` + await systemResponse.text();
+        }
+        system.waypoints = waypointResponse.pagedData;
     
         let waypointMap = { [system.symbol]: system };
         system.waypoints.forEach(w => waypointMap[w.symbol] = w);
@@ -585,37 +697,17 @@ class RenderableSystem extends Renderable {
 
     setStyleBySystemType(ctx) {
         ctx.strokeStyle = rgba(255, 255, 255, 0.1);
-        switch (this.system.type) {
-            case "BLUE_STAR":
-                ctx.fillStyle = rgb(0, 0, 128);
-                break;
-            case "RED_STAR":
-                ctx.fillStyle = rgb(64, 0, 0);
-                break;
-            case "ORANGE_STAR":
-                ctx.fillStyle = rgb(128, 64, 0);
-                break;
-            case "WHITE_DWARF":
-                ctx.fillStyle = rgb(192, 192, 192);
-                break;
-            case "BLACK_HOLE":
-                ctx.strokeStyle = rgba(255, 255, 255, 1);
-                ctx.fillStyle = rgb(0, 0, 0);
-                break;
-            case "UNSTABLE":
-                ctx.fillStyle = rgb(128, 0, 128);
-                break;
-            case "NEUTRON_STAR":
-                ctx.fillStyle = rgb(128, 128, 255);
-                break;
-            case "HYPERGIANT":
-                ctx.fillStyle = rgb(255, 128, 128);
-                break;
-            case "YOUNG_STAR":
-                ctx.fillStyle = rgb(0, 64, 0);
-                break;
-            default:
-                throw "Unknown system type: " + system.type;
+
+        const systemTypeInfo = Api.constants.systemTypes[this.system.type];
+        if (systemTypeInfo) {
+            ctx.fillStyle = systemTypeInfo.fillColor;
+            if (systemTypeInfo.strokeColor) {
+                ctx.strokeStyle = systemTypeInfo.strokeColor;
+            }
+        }
+        else {
+            ctx.fillStyle = rgb(255, 255, 255);
+            console.log("Unknown system type: " + system.type);
         }
     }
 
@@ -625,52 +717,19 @@ class RenderableSystem extends Renderable {
             throw 'multiple factions: ' + JSON.stringify(this.system);
         }
         const faction = this.system.factions[0]?.symbol ?? null;
-        switch (faction) {
-            // Reds
-            case "QUANTUM":
-                ctx.fillStyle = rgb(64, 0, 0);
-                break;
-            case "DOMINION":
-                ctx.fillStyle = rgb(255, 0, 0);
-                break;
-
-            // Greens
-            case "GALACTIC":
-                ctx.fillStyle = rgb(0, 64, 0);
-                break;
-            case "COBALT":
-                ctx.fillStyle = rgb(0, 192, 0);
-                break;
-            case "ECHO":
-                ctx.fillStyle = rgb(0, 255, 0);
-                break;
-
-            // Blues
-            case "VOID":
-                ctx.fillStyle = rgb(0, 0, 64);
-                break;
-            case "AEGIS":
-                ctx.fillStyle = rgb(0, 0, 192);
-                break;
-
-            // Yellows
-            case "COSMIC":
-                ctx.fillStyle = rgb(64, 64, 0);
-                break;
-            case "OBSIDIAN":
-                ctx.fillStyle = rgb(192, 192, 0);
-                break;
-
-            // news
-
-            case null:
-                ctx.strokeStyle = rgba(255, 255, 255, 0.2);
-                ctx.fillStyle = rgba(0, 0, 0, 0);
-                break;
-            default:
+        if (faction) {
+            const factionInfo = Api.constants.factions[faction];
+            if (factionInfo) {
+                ctx.fillStyle = factionInfo.fillColor;
+            }
+            else {
                 ctx.fillStyle = rgb(255, 255, 255);
                 console.log("Unknown system faction: " + faction);
-                break;
+            }
+        }
+        else {
+            ctx.strokeStyle = rgba(255, 255, 255, 0.2);
+            ctx.fillStyle = rgba(0, 0, 0, 0);
         }
     }
 }
