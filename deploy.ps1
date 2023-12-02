@@ -1,6 +1,9 @@
 Remove-Item .\SpaceTraders -Recurse -Force
 mkdir .\SpaceTraders
 
+mkdir .\data
+Copy-Item -Path ..\ShinySpaceTraders\dist\data\systems.json.gz -Destination .\data\
+
 mkdir .\SpaceTraders\game
 Copy-Item -Path ..\ShinySpaceTraders\dist\web\prod\game*.* -Destination .\SpaceTraders\game\ -Recurse
 Remove-Item -Force .\SpaceTraders\game\*.map
